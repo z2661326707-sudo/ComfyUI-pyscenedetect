@@ -84,8 +84,8 @@ class SceneDetect:
                     "scene_number": i + 1,
                     "start_timecode": start_tc.get_timecode(),
                     "end_timecode": end_tc.get_timecode(),
-                    "start_seconds": round(start_tc.seconds, 3),
-                    "end_seconds": round(end_tc.seconds, 3),
+                    "start_seconds": round(start_tc.frame_num / fps, 3),
+                    "end_seconds": round(end_tc.frame_num / fps, 3),
                     "start_frame": start_tc.frame_num,
                     "end_frame": end_tc.frame_num,
                 }
@@ -96,7 +96,7 @@ class SceneDetect:
             "scenes": scenes,
             "total_scenes": len(scenes),
             "video_fps": fps,
-            "video_duration": round(scene_list[-1][1].seconds, 3)
+            "video_duration": round(scene_list[-1][1].frame_num / fps, 3)
             if scene_list
             else 0.0,
         }
