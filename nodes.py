@@ -45,7 +45,7 @@ class SceneDetect:
                 ),
                 "min_scene_len": (
                     "FLOAT",
-                    {"default": 0.5, "min": 0.0, "max": 60.0, "step": 0.1},
+                    {"default": 1.0, "min": 0.0, "max": 60.0, "step": 0.1},
                 ),
             },
         }
