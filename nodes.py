@@ -59,7 +59,7 @@ class SceneDetect:
     ):
         # Create detector with selected threshold
         detector_cls = DETECTOR_MAP[detector]
-        det = detector_cls(threshold=threshold, min_scene_len=min_scene_len)
+        det = detector_cls(threshold=threshold, min_scene_len=f"{min_scene_len}s")
 
         # Run detection using PySceneDetect high-level API
         scene_list = detect(
