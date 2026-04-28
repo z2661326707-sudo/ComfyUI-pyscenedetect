@@ -75,7 +75,7 @@ class SceneDetect:
         scene_manager = SceneManager()
         scene_manager.add_detector(det)
         scene_manager.detect_scenes(video, show_progress=True)
-        scene_list = scene_manager.get_scene_list(start_in_scene=True)
+        scene_list = scene_manager.get_scene_list(start_in_scene=False)
 
         # Build internal SCENE_LIST dict
         scenes = []
