@@ -1,6 +1,7 @@
 """ComfyUI-pyscenedetect: Scene detection and video splitting using PySceneDetect."""
 
 import os
+import shutil
 from scenedetect import (
     open_video,
     SceneManager,
@@ -143,9 +144,9 @@ class SplitVideo:
     CATEGORY = "Video/SceneDetect"
 
     def split_video(self, scene_list, output_dir="", filename_prefix=""):
-        from scenedetect import split_video_ffmpeg, is_ffmpeg_available
+        from scenedetect import split_video_ffmpeg
 
-        if not is_ffmpeg_available():
+        if not shutil.which("ffmpeg"):
             raise RuntimeError(
                 "ffmpeg is not available. Please install ffmpeg to use video splitting.\n"
                 "Install: https://ffmpeg.org/download.html"
