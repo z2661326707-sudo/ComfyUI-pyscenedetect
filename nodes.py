@@ -2,7 +2,8 @@
 
 import os
 from scenedetect import (
-    detect,
+    open_video,
+    SceneManager,
     ContentDetector,
     AdaptiveDetector,
     ThresholdDetector,
@@ -57,17 +58,23 @@ class SceneDetect:
     def detect_scenes(
         self, video_path: str, detector: str, threshold: float, min_scene_len: float
     ):
-        # Create detector with selected threshold
-        detector_cls = DETECTOR_MAP[detector]
-        det = detector_cls(threshold=threshold, min_scene_len=f"{min_scene_len}s")
+        # Open video to get FPS for frame count conversion
+        video = open_video(video_path)
+        fps = video.frame_rate
 
-        # Run detection using PySceneDetect high-level API
-        scene_list = detect(
-            video_path,
-            det,
-            show_progress=True,
-            start_in_scene=True,
-        )
+        # Convert min_scene_len from seconds to integer frame count
+        # PySceneDetect requires int for min_scene_len to avoid internal type errors
+        min_scene_frames = max(1, int(min_scene_len * fps))
+
+        # Create detector with integer min_scene_len
+        detector_cls = DETECTOR_MAP[detector]
+        det = detector_cls(threshold=threshold, min_scene_len=min_scene_frames)
+
+        # Run detection using SceneManager
+        scene_manager = SceneManager()
+        scene_manager.add_detector(det)
+        scene_manager.detect_scenes(video, show_progress=True)
+        scene_list = scene_manager.get_scene_list(start_in_scene=True)
 
         # Build internal SCENE_LIST dict
         scenes = []
@@ -88,7 +95,7 @@ class SceneDetect:
             "video_path": video_path,
             "scenes": scenes,
             "total_scenes": len(scenes),
-            "video_fps": scene_list[0][0].framerate if scene_list else 0.0,
+            "video_fps": fps,
             "video_duration": round(scene_list[-1][1].seconds, 3)
             if scene_list
             else 0.0,
