@@ -136,7 +136,7 @@ class SplitVideo:
     CATEGORY = "Video/SceneDetect"
 
     def split_video(self, scene_list, output_dir="", filename_prefix=""):
-        from scenedetect import split_video_ffmpeg, is_ffmpeg_available, open_video
+        from scenedetect import split_video_ffmpeg, is_ffmpeg_available
 
         if not is_ffmpeg_available():
             raise RuntimeError(
