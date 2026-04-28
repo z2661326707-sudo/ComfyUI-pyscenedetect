@@ -68,8 +68,14 @@ class SceneDetect:
         min_scene_frames = max(1, int(min_scene_len * fps))
 
         # Create detector with integer min_scene_len
+        # Note: AdaptiveDetector uses 'adaptive_threshold' instead of 'threshold'
         detector_cls = DETECTOR_MAP[detector]
-        det = detector_cls(threshold=threshold, min_scene_len=min_scene_frames)
+        if detector == "Adaptive":
+            det = detector_cls(
+                adaptive_threshold=threshold, min_scene_len=min_scene_frames
+            )
+        else:
+            det = detector_cls(threshold=threshold, min_scene_len=min_scene_frames)
 
         # Run detection using SceneManager
         scene_manager = SceneManager()
