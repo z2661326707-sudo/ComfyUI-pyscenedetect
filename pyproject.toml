@@ -1,0 +1,16 @@
+[project]
+name = "ComfyUI-pyscenedetect"
+version = "1.0.0"
+description = "Scene detection and video splitting for ComfyUI using PySceneDetect"
+license = {file = "LICENSE"}
+dependencies = [
+  "scenedetect[opencv]>=0.6.4"
+]
+
+[project.urls]
+Repository = "https://github.com/z2661326707-sudo/ComfyUI-pyscenedetect"
+
+[tool.comfy]
+publisher_id = "z2661326707-sudo"
+display_name = "ComfyUI-pyscenedetect"
+icon = ""
