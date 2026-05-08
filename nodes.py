@@ -323,6 +323,7 @@ class SplitVideo:
 
     RETURN_TYPES = ("VHS_FILENAMES",)
     RETURN_NAMES = ("VHS_FILENAMES",)
+    OUTPUT_IS_LIST = (True,)
     FUNCTION = "split_video"
     CATEGORY = "Video/SceneDetect"
 
@@ -457,6 +458,10 @@ class SplitVideo:
             ]
         )
 
-        # Return as VHS_FILENAMES format: (is_grid: bool, file_list: list)
-        # is_grid=False means this is a flat list of video files (standard for upload nodes)
-        return (False, file_paths)
+        # Build a list of single-file VHS_FILENAMES tuples for ComfyUI list mapping
+        # ComfyUI will automatically map downstream nodes (like OSS Video Uploader)
+        # over this list, executing them once per file.
+        single_file_outputs = [(False, [fp]) for fp in file_paths]
+
+        # ComfyUI expects a 1-tuple for single output. OUTPUT_IS_LIST tells it to iterate.
+        return (single_file_outputs,)
