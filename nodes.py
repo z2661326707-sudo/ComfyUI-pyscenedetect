@@ -144,7 +144,6 @@ def _separate_vocals(
         "demucs",
         "--two-stems", "vocals",
         "--out", output_dir,
-        "--quiet",
         audio_path,
     ]
     try:
