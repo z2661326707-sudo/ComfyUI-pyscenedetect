@@ -13,10 +13,10 @@
       "id": "refactor-split-logic",
       "title": "Refactor Video Split Logic — Enforce min_segment_len & Skip Unnecessary Sub-Split",
       "plan_path": ".agents/plans/refactor-split-logic.md",
-      "status": "InReview",
-      "progress": 75,
+      "status": "Done",
+      "progress": 100,
       "created_at": "2026-05-08",
-      "notes": "Implementation done, entering QC three-review. Syntax + structure verified OK."
+      "notes": "Refactoring + QC fixes complete. QC re-review: Approve. Ready for merge."
     }
   ]
 }

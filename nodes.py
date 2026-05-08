@@ -360,6 +360,7 @@ class SplitVideo:
         min_silence_duration,
         video_path,
         tmp_dir,
+        scene_index,
     ):
         """Generate ideal cut points for a single scene using silence lookback.
 
@@ -367,7 +368,7 @@ class SplitVideo:
         """
         # Extract audio for this scene
         tmp_audio = os.path.join(
-            tmp_dir, f"audio_{scene_start_sec:.3f}.wav"
+            tmp_dir, f"audio_{scene_index:04d}.wav"
         )
         _extract_scene_audio(video_path, scene_start_sec, scene_end_sec, tmp_audio)
 
@@ -442,38 +443,37 @@ class SplitVideo:
 
     @staticmethod
     def _merge_short_segments(scenes_tc, min_segment_len):
-        """Post-process: merge undersized segments into a neighbor.
-
-        Iterates the final segment list.  Any segment shorter than
-        *min_segment_len* is merged into the previous segment (preferred)
-        or, if it is the first segment, into the next one.
-        """
+        """Post-process: merge undersized segments until all meet min_segment_len."""
         if len(scenes_tc) <= 1:
             return scenes_tc
 
-        merged: list[tuple] = []
-        i = 0
-        while i < len(scenes_tc):
-            start, end = scenes_tc[i]
-            dur = end.get_seconds() - start.get_seconds()
-            if dur >= min_segment_len:
-                merged.append((start, end))
-                i += 1
-            else:
-                # Merge into previous segment if one exists.
-                if merged:
-                    prev_start, _ = merged[-1]
-                    merged[-1] = (prev_start, end)
-                elif i + 1 < len(scenes_tc):
-                    # First segment and too short — merge into next.
-                    _, next_end = scenes_tc[i + 1]
-                    merged.append((start, next_end))
-                    i += 1  # skip the next segment (already consumed)
-                else:
-                    # Single undersized segment — nothing to merge with.
+        while len(scenes_tc) > 1:
+            changed = False
+            merged: list[tuple] = []
+            i = 0
+            while i < len(scenes_tc):
+                start, end = scenes_tc[i]
+                dur = end.get_seconds() - start.get_seconds()
+                if dur >= min_segment_len:
                     merged.append((start, end))
                     i += 1
-        return merged
+                else:
+                    if merged:
+                        prev_start, _ = merged[-1]
+                        merged[-1] = (prev_start, end)
+                        changed = True
+                    elif i + 1 < len(scenes_tc):
+                        _, next_end = scenes_tc[i + 1]
+                        merged.append((start, next_end))
+                        i += 1
+                        changed = True
+                    else:
+                        merged.append((start, end))
+                        i += 1
+            scenes_tc = merged
+            if not changed:
+                break
+        return scenes_tc
 
     # ------------------------------------------------------------------
     # Public entry point
@@ -518,6 +518,7 @@ class SplitVideo:
             final_scenes_tc: list[tuple] = []
 
             with tempfile.TemporaryDirectory(prefix="scenedetect_audio_") as tmp_dir:
+                scene_idx = 0
                 for start_tc, end_tc in scenes_tc:
                     start_sec = start_tc.get_seconds()
                     end_sec = end_tc.get_seconds()
@@ -525,6 +526,7 @@ class SplitVideo:
                     # Short scenes pass through directly — no audio extraction.
                     if not self._needs_subsplit(start_sec, end_sec, max_scene_len):
                         final_scenes_tc.append((start_tc, end_tc))
+                        scene_idx += 1
                         continue
 
                     # Generate ideal cut positions with silence lookback.
@@ -537,7 +539,9 @@ class SplitVideo:
                         min_silence_duration,
                         video_path,
                         tmp_dir,
+                        scene_index=scene_idx,
                     )
+                    scene_idx += 1
 
                     # Filter candidates to respect min_segment_len.
                     filtered = self._filter_cuts_with_min_len(
