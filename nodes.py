@@ -330,6 +330,155 @@ class SplitVideo:
     FUNCTION = "split_video"
     CATEGORY = "Video/SceneDetect"
 
+    # ------------------------------------------------------------------
+    # Private helpers – extracted from the monolithic split_video()
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _build_scene_timecodes(scene_list):
+        """Reconstruct FrameTimecode pairs from a SCENE_LIST dict."""
+        fps = scene_list["video_fps"]
+        scenes_tc = []
+        for s in scene_list["scenes"]:
+            start = FrameTimecode(s["start_timecode"], fps=fps)
+            end = FrameTimecode(s["end_timecode"], fps=fps)
+            scenes_tc.append((start, end))
+        return scenes_tc
+
+    @staticmethod
+    def _needs_subsplit(start_sec, end_sec, max_scene_len):
+        """Return True when a scene is longer than *max_scene_len*."""
+        return (end_sec - start_sec) > max_scene_len
+
+    def _candidate_cuts_for_scene(
+        self,
+        scene_start_sec,
+        scene_end_sec,
+        max_scene_len,
+        max_lookback,
+        breath_threshold,
+        min_silence_duration,
+        video_path,
+        tmp_dir,
+    ):
+        """Generate ideal cut points for a single scene using silence lookback.
+
+        Returns a sorted list of absolute cut-point times (seconds).
+        """
+        # Extract audio for this scene
+        tmp_audio = os.path.join(
+            tmp_dir, f"audio_{scene_start_sec:.3f}.wav"
+        )
+        _extract_scene_audio(video_path, scene_start_sec, scene_end_sec, tmp_audio)
+
+        # Separate vocals for better breath-point detection
+        vocals_path = _separate_vocals(tmp_audio, tmp_dir)
+
+        # Find silence points in vocals
+        silence_starts = _find_silence_points(
+            vocals_path,
+            silence_thresh=breath_threshold,
+            min_silence_len=min_silence_duration,
+        )
+
+        # Silence points are relative to the extracted audio segment,
+        # so shift them into absolute video time.
+        silence_starts_abs = [sp + scene_start_sec for sp in silence_starts]
+
+        # Walk through the scene generating ideal cut positions.
+        candidates: list[float] = []
+        cursor_sec = scene_start_sec
+
+        while True:
+            next_ideal_sec = cursor_sec + max_scene_len
+            if next_ideal_sec >= scene_end_sec:
+                break  # No room for another full-length segment.
+
+            # Look for silence points in the lookback window.
+            search_start = next_ideal_sec - max_lookback
+            window_hits = [
+                sp
+                for sp in silence_starts_abs
+                if search_start <= sp <= next_ideal_sec
+            ]
+
+            if window_hits:
+                actual_cut_sec = window_hits[-1]  # prefer latest silence
+            else:
+                actual_cut_sec = next_ideal_sec
+
+            candidates.append(actual_cut_sec)
+            cursor_sec = actual_cut_sec
+
+        return candidates
+
+    @staticmethod
+    def _filter_cuts_with_min_len(candidates, start_sec, end_sec, min_segment_len):
+        """Greedy filter: keep cut points that maintain minimum segment length.
+
+        Walks *candidates* in order.  A candidate is kept only when the
+        segment it would create (from the previous kept cut, or *start_sec*)
+        is at least *min_segment_len* seconds long.
+        """
+        filtered: list[float] = []
+        segment_start = start_sec
+        for cut_sec in candidates:
+            if (cut_sec - segment_start) >= min_segment_len:
+                filtered.append(cut_sec)
+                segment_start = cut_sec
+        return filtered
+
+    @staticmethod
+    def _build_sub_segments(start_tc, end_tc, filtered_cuts, fps):
+        """Turn filtered cut-points into (FrameTimecode, FrameTimecode) pairs."""
+        segments = []
+        prev_tc = start_tc
+        for cut_sec in filtered_cuts:
+            cut_tc = FrameTimecode(timecode=cut_sec, fps=fps)
+            segments.append((prev_tc, cut_tc))
+            prev_tc = cut_tc
+        segments.append((prev_tc, end_tc))
+        return segments
+
+    @staticmethod
+    def _merge_short_segments(scenes_tc, min_segment_len):
+        """Post-process: merge undersized segments into a neighbor.
+
+        Iterates the final segment list.  Any segment shorter than
+        *min_segment_len* is merged into the previous segment (preferred)
+        or, if it is the first segment, into the next one.
+        """
+        if len(scenes_tc) <= 1:
+            return scenes_tc
+
+        merged: list[tuple] = []
+        i = 0
+        while i < len(scenes_tc):
+            start, end = scenes_tc[i]
+            dur = end.get_seconds() - start.get_seconds()
+            if dur >= min_segment_len:
+                merged.append((start, end))
+                i += 1
+            else:
+                # Merge into previous segment if one exists.
+                if merged:
+                    prev_start, _ = merged[-1]
+                    merged[-1] = (prev_start, end)
+                elif i + 1 < len(scenes_tc):
+                    # First segment and too short — merge into next.
+                    _, next_end = scenes_tc[i + 1]
+                    merged.append((start, next_end))
+                    i += 1  # skip the next segment (already consumed)
+                else:
+                    # Single undersized segment — nothing to merge with.
+                    merged.append((start, end))
+                    i += 1
+        return merged
+
+    # ------------------------------------------------------------------
+    # Public entry point
+    # ------------------------------------------------------------------
+
     def split_video(
         self,
         scene_list,
@@ -349,6 +498,8 @@ class SplitVideo:
                 "Install: https://ffmpeg.org/download.html"
             )
 
+        import tempfile
+
         video_path = scene_list["video_path"]
         fps = scene_list["video_fps"]
 
@@ -359,103 +510,55 @@ class SplitVideo:
         # Ensure output directory exists
         os.makedirs(output_dir, exist_ok=True)
 
-        # Build initial FrameTimecode scene list
-        scenes_tc = []
-        for s in scene_list["scenes"]:
-            start = FrameTimecode(s["start_timecode"], fps=fps)
-            end = FrameTimecode(s["end_timecode"], fps=fps)
-            scenes_tc.append((start, end))
+        # 1. Build initial scene list from SCENE_LIST dict
+        scenes_tc = self._build_scene_timecodes(scene_list)
 
-        # Sub-split long scenes at breath points if max_scene_len > 0
+        # 2. Sub-split long scenes at breath points if max_scene_len > 0
         if max_scene_len > 0:
-            import tempfile
-
-            final_scenes_tc = []
+            final_scenes_tc: list[tuple] = []
 
             with tempfile.TemporaryDirectory(prefix="scenedetect_audio_") as tmp_dir:
                 for start_tc, end_tc in scenes_tc:
-                    duration = end_tc.get_seconds() - start_tc.get_seconds()
-                    if duration <= max_scene_len:
+                    start_sec = start_tc.get_seconds()
+                    end_sec = end_tc.get_seconds()
+
+                    # Short scenes pass through directly — no audio extraction.
+                    if not self._needs_subsplit(start_sec, end_sec, max_scene_len):
                         final_scenes_tc.append((start_tc, end_tc))
                         continue
 
-                    # Extract audio for this scene
-                    scene_start_sec = start_tc.get_seconds()
-                    tmp_audio = os.path.join(tmp_dir, f"audio_{len(final_scenes_tc)}.wav")
-                    _extract_scene_audio(video_path, scene_start_sec, end_tc.get_seconds(), tmp_audio)
-
-                    # Separate vocals using demucs for better breath-point detection
-                    vocals_path = _separate_vocals(tmp_audio, tmp_dir)
-
-                    # Find silence points in the vocals-only audio
-                    silence_starts = _find_silence_points(
-                        vocals_path,
-                        silence_thresh=breath_threshold,
-                        min_silence_len=min_silence_duration,
+                    # Generate ideal cut positions with silence lookback.
+                    candidates = self._candidate_cuts_for_scene(
+                        start_sec,
+                        end_sec,
+                        max_scene_len,
+                        max_lookback,
+                        breath_threshold,
+                        min_silence_duration,
+                        video_path,
+                        tmp_dir,
                     )
 
-                    # Silence points are relative to the extracted audio segment
-                    # which starts at scene_start_sec, so add offset
-                    silence_starts_abs = [sp + scene_start_sec for sp in silence_starts]
+                    # Filter candidates to respect min_segment_len.
+                    filtered = self._filter_cuts_with_min_len(
+                        candidates, start_sec, end_sec, min_segment_len
+                    )
 
-                    # Dynamically recalculate ideal cut points after each actual cut
-                    current_start = start_tc
-                    current_start_sec = scene_start_sec
-
-                    while True:
-                        next_ideal_sec = current_start_sec + max_scene_len
-                        if next_ideal_sec >= end_tc.get_seconds():
-                            break  # No more room for a full max_scene_len segment
-
-                        search_start = next_ideal_sec - max_lookback
-                        candidates = [
-                            sp for sp in silence_starts_abs
-                            if search_start <= sp <= next_ideal_sec
-                        ]
-
-                        if candidates:
-                            actual_cut_sec = candidates[-1]
-                        else:
-                            actual_cut_sec = next_ideal_sec
-
-                        actual_cut_sec = max(actual_cut_sec, current_start_sec + 0.1)
-
-                        # Minimum segment length check:
-                        # If this cut would produce a segment shorter than min_segment_len,
-                        # skip it. Advancing current_start_sec ensures the loop progresses
-                        # and the "skipped" time is effectively merged into the next segment.
-                        if (actual_cut_sec - current_start_sec) < min_segment_len:
-                            current_start_sec = next_ideal_sec
-                            continue
-
-                        actual_cut_tc = FrameTimecode(timecode=actual_cut_sec, fps=fps)
-                        final_scenes_tc.append((current_start, actual_cut_tc))
-                        current_start = actual_cut_tc
-                        current_start_sec = actual_cut_sec
-
-                    # Final segment logic:
-                    # If the last remaining segment is too short:
-                    # 1. Pop the last cut we just made.
-                    # 2. Restore current_start to the beginning of that dropped segment.
-                    # 3. The tail will now merge with the previous segment.
-                    remaining = end_tc.get_seconds() - current_start_sec
-                    if remaining < min_segment_len and len(final_scenes_tc) > 0:
-                        final_scenes_tc.pop()
-                        if final_scenes_tc:
-                            current_start = final_scenes_tc[-1][0]
-                        else:
-                            current_start = start_tc
-
-                    final_scenes_tc.append((current_start, end_tc))
+                    # Convert filtered cuts into sub-segments.
+                    sub_segs = self._build_sub_segments(
+                        start_tc, end_tc, filtered, fps
+                    )
+                    final_scenes_tc.extend(sub_segs)
 
             scenes_tc = final_scenes_tc
 
-        # Set output file template
+        # 3. Global post-process: merge any remaining undersized segments.
+        scenes_tc = self._merge_short_segments(scenes_tc, min_segment_len)
+
+        # 4. Split video using ffmpeg
         output_template = os.path.join(
             output_dir, f"{filename_prefix}-Scene-$SCENE_NUMBER.mp4"
         )
-
-        # Split video using ffmpeg
         split_video_ffmpeg(
             video_path,
             scenes_tc,
@@ -464,7 +567,7 @@ class SplitVideo:
             show_progress=True,
         )
 
-        # Collect output file paths
+        # 5. Collect output file paths
         file_paths = sorted(
             [
                 os.path.join(output_dir, f)
