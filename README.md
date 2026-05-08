@@ -58,7 +58,7 @@ Detects scene change points in a video file or URL.
 
 ### Split Video
 
-Splits a video file at the detected scene boundaries using ffmpeg. When `max_scene_len` is set, long scenes are further sub-split at audio silence points (breath points) for natural-cut boundaries.
+Splits a video file at the detected scene boundaries using ffmpeg. When `max_scene_len` is set, long scenes are further sub-split at audio silence points (breath points) for natural-cut boundaries. Uses demucs for vocal separation before silence detection.
 
 | Input                  | Type       | Default            | Description                                           |
 |------------------------|------------|--------------------|-------------------------------------------------------|
@@ -69,6 +69,7 @@ Splits a video file at the detected scene boundaries using ffmpeg. When `max_sce
 | `breath_threshold`     | FLOAT      | -40.0              | Silence detection threshold in dBFS (-80.0 to 0.0)    |
 | `min_silence_duration` | INT        | 150                | Minimum silence duration in ms (50-1000)              |
 | `max_lookback`         | FLOAT      | 2.0                | Max seconds to look back for breath point (0.5-10.0)  |
+| *(Prerequisite)*      | —          | —                  | Requires `demucs` for vocal separation, `pydub` for silence detection |
 
 | Output           | Type            | Description                                           |
 |------------------|-----------------|-------------------------------------------------------|

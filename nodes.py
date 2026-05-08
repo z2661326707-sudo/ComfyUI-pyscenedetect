@@ -107,6 +107,73 @@ def _extract_scene_audio(
         )
 
 
+def _separate_vocals(
+    audio_path: str,
+    output_dir: str,
+) -> str:
+    """Separate vocals from audio using demucs.
+
+    Runs demucs CLI in ``--two-stems=vocals`` mode, which splits the input
+    into ``vocals`` and ``other`` stems. Returns the path to the vocals file.
+
+    Args:
+        audio_path: Path to input audio file (any format ffmpeg supports).
+        output_dir: Directory where demucs will output separated stems.
+
+    Returns:
+        Absolute path to the vocals-only audio file (WAV format).
+
+    Raises:
+        RuntimeError: If demucs is not installed or separation fails.
+    """
+    import subprocess
+    from pathlib import Path
+
+    if not shutil.which("demucs"):
+        raise RuntimeError(
+            "demucs is not available. Please install demucs to use vocal separation.\n"
+            "Install: pip install demucs>=4.1.0"
+        )
+
+    if not Path(audio_path).exists():
+        raise RuntimeError(
+            f"Audio file not found for vocal separation: {audio_path}"
+        )
+
+    cmd = [
+        "demucs",
+        "--two-stems", "vocals",
+        "--out", output_dir,
+        "--quiet",
+        audio_path,
+    ]
+    try:
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=300
+        )
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(
+            f"demucs vocal separation timed out for {audio_path}"
+        )
+
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"demucs vocal separation failed: {(result.stderr or '').strip()}"
+        )
+
+    # demucs outputs to {output_dir}/htdemucs/{filename_stem}/vocals.wav
+    stem_dir = Path(output_dir) / "htdemucs" / Path(audio_path).stem
+    vocals_path = stem_dir / "vocals.wav"
+    if not vocals_path.exists():
+        # Try MP3 fallback
+        vocals_path = stem_dir / "vocals.mp3"
+    if not vocals_path.exists():
+        raise RuntimeError(
+            f"demucs completed but vocals file not found at {stem_dir}"
+        )
+    return str(vocals_path)
+
+
 DETECTOR_MAP = {
     "Content": ContentDetector,
     "Adaptive": AdaptiveDetector,
@@ -312,9 +379,12 @@ class SplitVideo:
                     tmp_audio = os.path.join(tmp_dir, f"audio_{len(final_scenes_tc)}.wav")
                     _extract_scene_audio(video_path, scene_start_sec, end_tc.get_seconds(), tmp_audio)
 
-                    # Find silence points in the scene audio
+                    # Separate vocals using demucs for better breath-point detection
+                    vocals_path = _separate_vocals(tmp_audio, tmp_dir)
+
+                    # Find silence points in the vocals-only audio
                     silence_starts = _find_silence_points(
-                        tmp_audio,
+                        vocals_path,
                         silence_thresh=breath_threshold,
                         min_silence_len=min_silence_duration,
                     )
