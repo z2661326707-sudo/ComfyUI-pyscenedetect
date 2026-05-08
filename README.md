@@ -58,17 +58,21 @@ Detects scene change points in a video file or URL.
 
 ### Split Video
 
-Splits a video file at the detected scene boundaries using ffmpeg.
+Splits a video file at the detected scene boundaries using ffmpeg. When `max_scene_len` is set, long scenes are further sub-split at audio silence points (breath points) for natural-cut boundaries.
 
-| Input            | Type       | Default            | Description                    |
-|------------------|------------|--------------------|--------------------------------|
-| `scene_list`     | SCENE_LIST | —                  | Output from Scene Detect node  |
-| `output_dir`     | STRING     | `ComfyUI/output/scene_videos` | Output directory path |
-| `filename_prefix`| STRING     | (video filename)   | Prefix for output clip files   |
+| Input                  | Type       | Default            | Description                                           |
+|------------------------|------------|--------------------|-------------------------------------------------------|
+| `scene_list`           | SCENE_LIST | —                  | Output from Scene Detect node                         |
+| `output_dir`           | STRING     | `ComfyUI/output/scene_videos` | Output directory path                      |
+| `filename_prefix`      | STRING     | (video filename)   | Prefix for output clip files                          |
+| `max_scene_len`        | FLOAT      | 0.0                | Maximum scene length in seconds (0 = no limit)        |
+| `breath_threshold`     | FLOAT      | -40.0              | Silence detection threshold in dBFS (-80.0 to 0.0)    |
+| `min_silence_duration` | INT        | 150                | Minimum silence duration in ms (50-1000)              |
+| `max_lookback`         | FLOAT      | 2.0                | Max seconds to look back for breath point (0.5-10.0)  |
 
-| Output      | Type   | Description                              |
-|-------------|--------|------------------------------------------|
-| `file_paths`| STRING | Newline-separated paths of split clips   |
+| Output           | Type            | Description                                           |
+|------------------|-----------------|-------------------------------------------------------|
+| `VHS_FILENAMES`  | VHS_FILENAMES   | Tuple of (is_grid, file_list) compatible with upload nodes |
 
 ## Supported Detectors
 
@@ -83,8 +87,7 @@ Splits a video file at the detected scene boundaries using ffmpeg.
 ## Example Workflow
 
 ```
-Text/URL (STRING) ──→ VHS_LoadVideoPath ──IMAGE──→ (downstream)
-                 ──→ Scene Detect ──SCENE_LIST──→ Split Video ──file_paths──→ (downstream)
+Text/URL (STRING) ──→ Scene Detect ──SCENE_LIST──→ Split Video ──VHS_FILENAMES──→ OSS Video Uploader
 ```
 
 ## Credits

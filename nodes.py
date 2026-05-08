@@ -13,6 +13,100 @@ from scenedetect import (
     FrameTimecode,
 )
 
+def _find_silence_points(
+    audio_path: str,
+    silence_thresh: float = -40.0,
+    min_silence_len: int = 150,
+) -> list[float]:
+    """Detect silence regions in an audio file and return start times in seconds.
+
+    Uses pydub's silence.detect_silence which internally analyzes amplitude
+    in dBFS. Silence is defined as regions below ``silence_thresh`` dBFS
+    lasting at least ``min_silence_len`` ms.
+
+    Args:
+        audio_path: Path to audio file (any format ffmpeg supports).
+        silence_thresh: Silence threshold in dBFS (e.g. -40.0).
+        min_silence_len: Minimum silence duration in milliseconds.
+
+    Returns:
+        Sorted list of silence start times in seconds (float).
+    """
+    from pydub import AudioSegment
+    from pydub.silence import detect_silence
+
+    audio = AudioSegment.from_file(audio_path)
+    silent_ranges = detect_silence(
+        audio,
+        min_silence_len=min_silence_len,
+        silence_thresh=int(silence_thresh),
+        seek_step=10,
+    )
+    # detect_silence returns [[start_ms, end_ms], ...]
+    # Extract start times and convert to seconds
+    return [rng[0] / 1000.0 for rng in silent_ranges]
+
+
+def _extract_scene_audio(
+    video_path: str,
+    start_sec: float,
+    end_sec: float,
+    output_path: str,
+) -> None:
+    """Extract audio from a video segment to a temporary WAV file.
+
+    Uses ffmpeg to extract the audio track from the specified time range.
+
+    Args:
+        video_path: Path to the source video file.
+        start_sec: Start time in seconds.
+        end_sec: End time in seconds.
+        output_path: Path to write the extracted audio (WAV format).
+
+    Raises:
+        RuntimeError: If ffmpeg extraction fails (non-zero return code).
+    """
+    import subprocess
+
+    duration = end_sec - start_sec
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-ss", str(start_sec),
+        "-i", video_path,
+        "-t", str(duration),
+        "-vn",
+        "-acodec", "pcm_s16le",
+        "-ar", "16000",
+        "-ac", "1",
+        output_path,
+    ]
+    try:
+        result = subprocess.run(
+            cmd, capture_output=True, text=True,
+            timeout=max(120, int(duration * 3)),
+        )
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(
+            f"ffmpeg audio extraction timed out for {video_path} "
+            f"[{start_sec}s-{end_sec}s]"
+        )
+
+    if result.returncode != 0:
+        stderr = (result.stderr or "").strip()
+        # Provide friendly error for no-audio videos
+        if "no audio" in stderr.lower() or "stream map" in stderr.lower():
+            raise RuntimeError(
+                f"Video {video_path} has no audio track. "
+                f"Breath-point splitting requires audio. "
+                f"Set max_scene_len=0 to skip sub-splitting."
+            )
+        raise RuntimeError(
+            f"ffmpeg audio extraction failed for {video_path} "
+            f"[{start_sec}s-{end_sec}s]: {stderr}"
+        )
+
+
 DETECTOR_MAP = {
     "Content": ContentDetector,
     "Adaptive": AdaptiveDetector,
@@ -141,15 +235,40 @@ class SplitVideo:
             "optional": {
                 "output_dir": ("STRING", {"default": output_dir}),
                 "filename_prefix": ("STRING", {"default": ""}),
+                "max_scene_len": (
+                    "FLOAT",
+                    {"default": 0.0, "min": 0.0, "max": 600.0, "step": 0.1},
+                ),
+                "breath_threshold": (
+                    "FLOAT",
+                    {"default": -40.0, "min": -80.0, "max": 0.0, "step": 1.0},
+                ),
+                "min_silence_duration": (
+                    "INT",
+                    {"default": 150, "min": 50, "max": 1000, "step": 10},
+                ),
+                "max_lookback": (
+                    "FLOAT",
+                    {"default": 2.0, "min": 0.5, "max": 10.0, "step": 0.1},
+                ),
             },
         }
 
-    RETURN_TYPES = ("STRING",)
-    RETURN_NAMES = ("file_paths",)
+    RETURN_TYPES = ("VHS_FILENAMES",)
+    RETURN_NAMES = ("VHS_FILENAMES",)
     FUNCTION = "split_video"
     CATEGORY = "Video/SceneDetect"
 
-    def split_video(self, scene_list, output_dir="", filename_prefix=""):
+    def split_video(
+        self,
+        scene_list,
+        output_dir="",
+        filename_prefix="",
+        max_scene_len=0.0,
+        breath_threshold=-40.0,
+        min_silence_duration=150,
+        max_lookback=2.0,
+    ):
         from scenedetect import split_video_ffmpeg
 
         if not shutil.which("ffmpeg"):
@@ -159,6 +278,7 @@ class SplitVideo:
             )
 
         video_path = scene_list["video_path"]
+        fps = scene_list["video_fps"]
 
         # Determine filename prefix from original video name
         if not filename_prefix:
@@ -167,13 +287,82 @@ class SplitVideo:
         # Ensure output directory exists
         os.makedirs(output_dir, exist_ok=True)
 
-        # Build FrameTimecode scene list from stored data
-        fps = scene_list["video_fps"]
+        # Build initial FrameTimecode scene list
         scenes_tc = []
         for s in scene_list["scenes"]:
             start = FrameTimecode(s["start_timecode"], fps=fps)
             end = FrameTimecode(s["end_timecode"], fps=fps)
             scenes_tc.append((start, end))
+
+        # Sub-split long scenes at breath points if max_scene_len > 0
+        if max_scene_len > 0:
+            import tempfile
+
+            final_scenes_tc = []
+
+            with tempfile.TemporaryDirectory(prefix="scenedetect_audio_") as tmp_dir:
+                for start_tc, end_tc in scenes_tc:
+                    duration = end_tc.get_seconds() - start_tc.get_seconds()
+                    if duration <= max_scene_len:
+                        final_scenes_tc.append((start_tc, end_tc))
+                        continue
+
+                    # Extract audio for this scene
+                    scene_start_sec = start_tc.get_seconds()
+                    tmp_audio = os.path.join(tmp_dir, f"audio_{len(final_scenes_tc)}.wav")
+                    _extract_scene_audio(video_path, scene_start_sec, end_tc.get_seconds(), tmp_audio)
+
+                    # Find silence points in the scene audio
+                    silence_starts = _find_silence_points(
+                        tmp_audio,
+                        silence_thresh=breath_threshold,
+                        min_silence_len=min_silence_duration,
+                    )
+
+                    # Silence points are relative to the extracted audio segment
+                    # which starts at scene_start_sec, so add offset
+                    silence_starts_abs = [sp + scene_start_sec for sp in silence_starts]
+
+                    # Dynamically recalculate ideal cut points after each actual cut
+                    # to prevent segments exceeding max_scene_len
+                    current_start = start_tc
+                    current_start_sec = scene_start_sec
+
+                    while True:
+                        # Calculate next ideal cut from current position
+                        next_ideal_sec = current_start_sec + max_scene_len
+                        if next_ideal_sec >= end_tc.get_seconds():
+                            break  # Last segment will go to end_tc
+
+                        # Search range: [next_ideal - max_lookback, next_ideal]
+                        search_start = next_ideal_sec - max_lookback
+                        candidates = [
+                            sp for sp in silence_starts_abs
+                            if search_start <= sp <= next_ideal_sec
+                        ]
+
+                        if candidates:
+                            actual_cut_sec = candidates[-1]  # latest valid breath point
+                        else:
+                            actual_cut_sec = next_ideal_sec  # force-cut fallback
+
+                        # Safety clamp: ensure cut is not before current_start
+                        actual_cut_sec = max(actual_cut_sec, current_start_sec + 0.1)
+
+                        # Create FrameTimecode for the cut point
+                        actual_cut_tc = FrameTimecode(
+                            timecode=actual_cut_sec,
+                            fps=fps,
+                        )
+                        final_scenes_tc.append((current_start, actual_cut_tc))
+
+                        current_start = actual_cut_tc
+                        current_start_sec = actual_cut_sec
+
+                    # Last segment: from current_start to end_tc
+                    final_scenes_tc.append((current_start, end_tc))
+
+            scenes_tc = final_scenes_tc
 
         # Set output file template
         output_template = os.path.join(
@@ -198,6 +387,6 @@ class SplitVideo:
             ]
         )
 
-        file_paths_str = "\n".join(file_paths)
-
-        return (file_paths_str,)
+        # Return as VHS_FILENAMES format: (is_grid: bool, file_list: list)
+        # is_grid=False means this is a flat list of video files (standard for upload nodes)
+        return (False, file_paths)
