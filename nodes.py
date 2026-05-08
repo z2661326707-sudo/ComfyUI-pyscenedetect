@@ -458,4 +458,5 @@ class SplitVideo:
 
         # Return as VHS_FILENAMES format: (is_grid: bool, file_list: list)
         # is_grid=False means this is a flat list of video files (standard for upload nodes)
-        return (False, file_paths)
+        # Note: ComfyUI expects a 1-tuple for single output, so we wrap the tuple in another tuple.
+        return ((False, file_paths),)
