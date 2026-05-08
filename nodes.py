@@ -144,7 +144,6 @@ def _separate_vocals(
         "demucs",
         "--two-stems", "vocals",
         "--out", output_dir,
-        "--quiet",
         audio_path,
     ]
     try:
@@ -400,7 +399,6 @@ class SplitVideo:
                     silence_starts_abs = [sp + scene_start_sec for sp in silence_starts]
 
                     # Dynamically recalculate ideal cut points after each actual cut
-                    # to prevent segments exceeding max_scene_len
                     current_start = start_tc
                     current_start_sec = scene_start_sec
 
@@ -424,7 +422,8 @@ class SplitVideo:
 
                         # Minimum segment length check:
                         # If this cut would produce a segment shorter than min_segment_len,
-                        # skip it. The skipped duration merges into the next segment.
+                        # skip it. Advancing current_start_sec ensures the loop progresses
+                        # and the "skipped" time is effectively merged into the next segment.
                         if (actual_cut_sec - current_start_sec) < min_segment_len:
                             current_start_sec = next_ideal_sec
                             continue
@@ -435,13 +434,12 @@ class SplitVideo:
                         current_start_sec = actual_cut_sec
 
                     # Final segment logic:
-                    remaining = end_tc.get_seconds() - current_start_sec
-
                     # If the last remaining segment is too short:
                     # 1. Pop the last cut we just made.
                     # 2. Restore current_start to the beginning of that dropped segment.
                     # 3. The tail will now merge with the previous segment.
-                    if remaining < min_segment_len and final_scenes_tc:
+                    remaining = end_tc.get_seconds() - current_start_sec
+                    if remaining < min_segment_len and len(final_scenes_tc) > 0:
                         final_scenes_tc.pop()
                         if final_scenes_tc:
                             current_start = final_scenes_tc[-1][0]
