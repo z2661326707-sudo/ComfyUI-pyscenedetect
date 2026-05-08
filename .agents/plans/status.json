@@ -16,7 +16,7 @@
       "status": "Done",
       "progress": 100,
       "created_at": "2026-05-08",
-      "notes": "All fixes complete. Final bug in _merge_short_segments index logic corrected. Ready for testing."
+      "notes": "All critical fixes complete: max_scene_len=0 semantic preserved, file collection deterministic. Ready for final testing."
     }
   ]
 }
