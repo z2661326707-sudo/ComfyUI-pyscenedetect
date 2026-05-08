@@ -114,7 +114,7 @@ Video Path ──→ Scene Detect ──SCENE_LIST──→ Split Video ──VH
 
 ## Parameters Tuning Guide
 
-- **`max_scene_len`**: Set to `0` to disable intelligent splitting. Typical values: `10.0`-`30.0` seconds.
+- **`max_scene_len`**: Set to `0` to disable intelligent splitting and preserve original scene boundaries exactly. Typical values: `10.0`-`30.0` seconds for dialogue content.
 - **`breath_threshold`**: Lower values (e.g., `-50.0`) detect quieter silences; higher values (e.g., `-20.0`) only detect loud gaps. Start with `-40.0`.
 - **`min_segment_len`**: Prevents very short clips. Default `2.0s` works for most dialogue content.
 - **`max_lookback`**: How far back to search for a breath point. `2.0s` is a good balance between natural cuts and staying close to target length.
@@ -124,3 +124,12 @@ Video Path ──→ Scene Detect ──SCENE_LIST──→ Split Video ──VH
 - [PySceneDetect](https://scenedetect.com/) — Python library for video scene detection
 - [demucs](https://github.com/adefossez/demucs) — Music source separation using deep learning
 - [pydub](https://github.com/jiaaro/pydub) — Simple audio manipulation
+
+## Changelog
+
+#### v0.2.1 (2026-05-08)
+- **Refactored Video Split Logic**: Reorganized `split_video()` into modular private methods for better maintainability and correctness.
+- **Fixed `min_segment_len` enforcement**: Corrected a logic bug where segments shorter than `min_segment_len` could still be produced. Added iterative merging to ensure all output clips meet the minimum length requirement.
+- **Fixed `max_scene_len=0` behavior**: When `max_scene_len` is set to `0`, the node now strictly preserves original scene boundaries without any sub-splitting or merging intervention.
+- **Fixed file collection reliability**: Replaced directory scanning with deterministic file path generation to prevent stale files from previous runs from appearing in the output list.
+- **Fixed audio filename collision**: Temp audio extraction now uses unique indices to prevent file overwrites during batch processing.

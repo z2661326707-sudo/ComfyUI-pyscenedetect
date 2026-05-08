@@ -1,6 +1,6 @@
 [project]
 name = "comfyui-pyscenedetect"
-version = "0.2.0"
+version = "0.2.1"
 description = "Scene detection and intelligent video splitting with vocal separation for ComfyUI"
 readme = "README.md"
 requires-python = ">=3.9"
