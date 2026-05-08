@@ -69,6 +69,7 @@ Splits a video file at the detected scene boundaries using ffmpeg. When `max_sce
 | `breath_threshold`     | FLOAT      | -40.0              | Silence detection threshold in dBFS (-80.0 to 0.0)    |
 | `min_silence_duration` | INT        | 150                | Minimum silence duration in ms (50-1000)              |
 | `max_lookback`         | FLOAT      | 2.0                | Max seconds to look back for breath point (0.5-10.0)  |
+| `min_segment_len`      | FLOAT      | 2.0                | Minimum segment length in seconds (0.5-60.0)          |
 | *(Prerequisite)*      | —          | —                  | Requires `demucs` for vocal separation, `pydub` for silence detection |
 
 | Output           | Type            | Description                                           |

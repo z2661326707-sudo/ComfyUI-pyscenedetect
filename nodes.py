@@ -318,6 +318,10 @@ class SplitVideo:
                     "FLOAT",
                     {"default": 2.0, "min": 0.5, "max": 10.0, "step": 0.1},
                 ),
+                "min_segment_len": (
+                    "FLOAT",
+                    {"default": 2.0, "min": 0.5, "max": 60.0, "step": 0.1},
+                ),
             },
         }
 
@@ -336,6 +340,7 @@ class SplitVideo:
         breath_threshold=-40.0,
         min_silence_duration=150,
         max_lookback=2.0,
+        min_segment_len=2.0,
     ):
         from scenedetect import split_video_ffmpeg
 
@@ -419,6 +424,14 @@ class SplitVideo:
 
                         # Safety clamp: ensure cut is not before current_start
                         actual_cut_sec = max(actual_cut_sec, current_start_sec + 0.1)
+
+                        # Minimum segment length check:
+                        # If the resulting segment would be too short, skip this cut point
+                        # and continue searching from the next ideal position.
+                        if (actual_cut_sec - current_start_sec) < min_segment_len:
+                            # Jump to next ideal position and continue loop
+                            current_start_sec = next_ideal_sec
+                            continue
 
                         # Create FrameTimecode for the cut point
                         actual_cut_tc = FrameTimecode(
