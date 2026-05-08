@@ -443,37 +443,43 @@ class SplitVideo:
 
     @staticmethod
     def _merge_short_segments(scenes_tc, min_segment_len):
-        """Post-process: merge undersized segments until all meet min_segment_len."""
+        """Post-process: merge undersized segments into neighbors until all meet min_segment_len."""
         if len(scenes_tc) <= 1:
             return scenes_tc
 
-        while len(scenes_tc) > 1:
+        scenes = list(scenes_tc)
+        while len(scenes) > 1:
             changed = False
-            merged: list[tuple] = []
+            new_scenes = []
             i = 0
-            while i < len(scenes_tc):
-                start, end = scenes_tc[i]
+            while i < len(scenes):
+                start, end = scenes[i]
                 dur = end.get_seconds() - start.get_seconds()
                 if dur >= min_segment_len:
-                    merged.append((start, end))
+                    new_scenes.append((start, end))
                     i += 1
                 else:
-                    if merged:
-                        prev_start, _ = merged[-1]
-                        merged[-1] = (prev_start, end)
+                    # Current segment is too short. Merge with previous if possible.
+                    if new_scenes:
+                        prev_start, _ = new_scenes[-1]
+                        new_scenes[-1] = (prev_start, end)
                         changed = True
-                    elif i + 1 < len(scenes_tc):
-                        _, next_end = scenes_tc[i + 1]
-                        merged.append((start, next_end))
                         i += 1
-                        changed = True
                     else:
-                        merged.append((start, end))
-                        i += 1
-            scenes_tc = merged
+                        # First segment is short, merge with next
+                        if i + 1 < len(scenes):
+                            _, next_end = scenes[i + 1]
+                            new_scenes.append((start, next_end))
+                            i += 2  # Skip next segment (already merged)
+                            changed = True
+                        else:
+                            # Only one segment left and it's short, keep it
+                            new_scenes.append((start, end))
+                            i += 1
+            scenes = new_scenes
             if not changed:
                 break
-        return scenes_tc
+        return scenes
 
     # ------------------------------------------------------------------
     # Public entry point
