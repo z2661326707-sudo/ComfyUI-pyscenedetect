@@ -563,7 +563,9 @@ class SplitVideo:
             scenes_tc = final_scenes_tc
 
         # 3. Global post-process: merge any remaining undersized segments.
-        scenes_tc = self._merge_short_segments(scenes_tc, min_segment_len)
+        # Skip when max_scene_len=0 to preserve original scene boundaries exactly.
+        if max_scene_len > 0:
+            scenes_tc = self._merge_short_segments(scenes_tc, min_segment_len)
 
         # 4. Split video using ffmpeg
         output_template = os.path.join(
@@ -577,14 +579,13 @@ class SplitVideo:
             show_progress=True,
         )
 
-        # 5. Collect output file paths
-        file_paths = sorted(
-            [
-                os.path.join(output_dir, f)
-                for f in os.listdir(output_dir)
-                if f.startswith(f"{filename_prefix}-Scene-") and f.endswith(".mp4")
-            ]
-        )
+        # 5. Collect output file paths — build directly from scenes_tc to avoid stale files
+        n_scenes = len(scenes_tc)
+        pad = max(3, len(str(n_scenes)))
+        file_paths = [
+            os.path.join(output_dir, f"{filename_prefix}-Scene-{str(i+1).zfill(pad)}.mp4")
+            for i in range(n_scenes)
+        ]
 
         # Build a list of single-file VHS_FILENAMES tuples for ComfyUI list mapping
         # ComfyUI will automatically map downstream nodes (like OSS Video Uploader)
