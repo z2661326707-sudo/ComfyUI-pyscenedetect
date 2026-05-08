@@ -16,7 +16,7 @@
       "status": "Done",
       "progress": 100,
       "created_at": "2026-05-08",
-      "notes": "Refactoring + QC fixes complete. QC re-review: Approve. Ready for merge."
+      "notes": "All fixes complete. Final bug in _merge_short_segments index logic corrected. Ready for testing."
     }
   ]
 }
