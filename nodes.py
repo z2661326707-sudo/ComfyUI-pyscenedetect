@@ -144,6 +144,7 @@ def _separate_vocals(
         "demucs",
         "--two-stems", "vocals",
         "--out", output_dir,
+        "--quiet",
         audio_path,
     ]
     try:
@@ -399,6 +400,7 @@ class SplitVideo:
                     silence_starts_abs = [sp + scene_start_sec for sp in silence_starts]
 
                     # Dynamically recalculate ideal cut points after each actual cut
+                    # to prevent segments exceeding max_scene_len
                     current_start = start_tc
                     current_start_sec = scene_start_sec
 
@@ -420,34 +422,32 @@ class SplitVideo:
 
                         actual_cut_sec = max(actual_cut_sec, current_start_sec + 0.1)
 
+                        # Minimum segment length check:
                         # If this cut would produce a segment shorter than min_segment_len,
-                        # skip it. Advancing current_start_sec ensures the loop progresses
-                        # and the "skipped" time is effectively merged into the next segment.
+                        # skip it. The skipped duration merges into the next segment.
                         if (actual_cut_sec - current_start_sec) < min_segment_len:
                             current_start_sec = next_ideal_sec
                             continue
 
-                        # Create FrameTimecode for the valid cut point
                         actual_cut_tc = FrameTimecode(timecode=actual_cut_sec, fps=fps)
                         final_scenes_tc.append((current_start, actual_cut_tc))
-
                         current_start = actual_cut_tc
                         current_start_sec = actual_cut_sec
 
-                    # Final segment check:
-                    # If the remaining duration is shorter than min_segment_len and we
-                    # already have at least one cut, drop the last cut to avoid a tiny
-                    # final fragment. The short tail will merge with the previous segment.
+                    # Final segment logic:
                     remaining = end_tc.get_seconds() - current_start_sec
+
+                    # If the last remaining segment is too short:
+                    # 1. Pop the last cut we just made.
+                    # 2. Restore current_start to the beginning of that dropped segment.
+                    # 3. The tail will now merge with the previous segment.
                     if remaining < min_segment_len and final_scenes_tc:
                         final_scenes_tc.pop()
-                        # Restore current_start to the start of the dropped segment
                         if final_scenes_tc:
                             current_start = final_scenes_tc[-1][0]
                         else:
                             current_start = start_tc
 
-                    # Append the last segment
                     final_scenes_tc.append((current_start, end_tc))
 
             scenes_tc = final_scenes_tc
